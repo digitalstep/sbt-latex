@@ -2,97 +2,75 @@ import sbt._
 import Keys._
 
 object SBTLaTeX extends Plugin {
+  val pdfLatex = SettingKey[String]("pdflatex", "Executable for PDF generation, such as pdflatex, xelatex, ...")
+  val pdfLatexDefault = pdfLatex := "pdflatex"
+
+  val useBibTex = SettingKey[Boolean]("use-bibtex", "Flag whether to use BibTex or not")
+  val useBibTexDefault = useBibTex := false
+
   val latexSourceDirectory = TaskKey[File](
     "latex-source-directory",
     "LaTeX source directory")
 
-  val latexSourceDirectoryDefinition =
-    latexSourceDirectory <<= baseDirectory map { baseDirectory =>
-      baseDirectory / "src" / "main" / "latex"
-    }
+  val latexSourceDirectoryDefinition = latexSourceDirectory <<= baseDirectory map {
+    _ / "src" / "main" / "latex"
+  }
 
-  //////////////////////////////////////////////////////////////////////////////
+  val latexSourceFiles = TaskKey[Seq[File]]("latex-source-files", "LaTeX source files")
 
-  val latexSourceFiles = TaskKey[Seq[File]](
-    "latex-source-files",
-    "LaTeX source files")
+  val latexSourceFileDefinition = latexSourceFiles <<= latexSourceDirectory map { dir ⇒
+    (dir ** "*.tex").get.filterNot(_.getPath.contains("#"))
+  }
 
-  val latexSourceFileDefinition =
-    latexSourceFiles <<= latexSourceDirectory map { latexSourceDirectory =>
-      val files = (latexSourceDirectory ** "*.tex").get.filterNot(_.getPath.contains("#"))
-      //      assert(
-      //        files.size == 1,
-      //        "There must be exactly one main .tex source. Found: " + files.toList.toString)
-      assert(
-        files.size >= 1,
-        "There must be at least one main .tex source.")
-      files
-    }
-
-  //////////////////////////////////////////////////////////////////////////////
-
-  val latexUnmanagedBase = TaskKey[File](
-    "latex-unmanaged-base",
+  val latexUnmanagedBase = TaskKey[File]("latex-unmanaged-base",
     "Directory containing external files needed to build the PDF, e.g. *.sty, *.bst")
 
-  val latexUnmanagedBaseDefinition =
-    latexUnmanagedBase <<= unmanagedBase map identity
+  val latexUnmanagedBaseDefinition = latexUnmanagedBase <<= unmanagedBase map identity
 
-  //////////////////////////////////////////////////////////////////////////////
-
-  val latexResourceDirectory = TaskKey[File](
-    "latex-resource-directory",
+  val latexResourceDirectory = TaskKey[File]("latex-resource-directory",
     "Directory containing files needed to build the PDF, e.g. *.bib, *.png")
 
   val latexResourceDirectoryDefinition =
     latexResourceDirectory <<= (resourceDirectory in Compile) map identity
-
-  //////////////////////////////////////////////////////////////////////////////
 
   val latex = TaskKey[Unit](
     "latex",
     "Compiles LaTeX source to PDF")
 
   val latexDefinition = latex <<=
-    (latexSourceDirectory, latexSourceFiles, latexUnmanagedBase, latexResourceDirectory, cacheDirectory, target, streams) map {
-      (latexSourceDirectory, latexSourceFiles, latexUnmanagedBase, latexResourceDirectory, cacheDirectory, target, streams) =>
+    (pdfLatex, useBibTex, latexSourceDirectory, latexSourceFiles, latexUnmanagedBase, latexResourceDirectory, cacheDirectory, target, streams) map {
+      (pdfLatex, useBibTex, latexSourceDirectory, latexSourceFiles, latexUnmanagedBase, latexResourceDirectory, cacheDirectory, target, streams) =>
         // Create the cache directory and copy the source files and dependencies
         // there.
+
         val latexCache = cacheDirectory / "latex"
-        IO.createDirectory(latexCache)
 
-        // Copy the files from the LaTeX source directory.
-        IO.copyDirectory(latexSourceDirectory, latexCache)
+        def toCache(files: File*) = {
+          IO.createDirectory(latexCache)
+          files.foreach(IO.copyDirectory(_, latexCache))
+        }
 
-        // Copy the main file over.
-        // val sourceInCache = latexCache / latexSourceFile.getName
-        // IO.copyFile(latexSourceFile, sourceInCache)
-
-        // Copy the external Tex source files.
-        IO.copyDirectory(latexUnmanagedBase, latexCache)
-
-        // Copy the extra resources needed to build.
-        IO.copyDirectory(latexResourceDirectory, latexCache)
-
-        ////////////////////////////////////////////////////////////////////////
+        toCache(latexSourceDirectory, latexUnmanagedBase, latexResourceDirectory)
 
         for (latexSourceFile <- latexSourceFiles) {
-          // Build the PDF.
           val pdflatex = Process(
-            // These flags tell pdflatex to quit if there's an error, not drop
-            // into some arcane, ancient, pdflatex shell.
-            "xelatex" :: "-file-line-error" :: "-halt-on-error" :: latexSourceFile.getName :: Nil,
+            Seq(pdfLatex,
+              "-file-line-error", // tell xelatex to quit if there's an error, not drop
+              "-halt-on-error", // into some arcane, ancient, xelatex shell.
+              latexSourceFile.getName),
             latexCache)
 
-          val bibtex = Process(
-            "bibtex" :: latexSourceFile.getName.replace(".tex", ".aux") :: Nil,
-            latexCache)
+          val bibtex = Process(Seq("bibtex", latexSourceFile.getName.replace(".tex", ".aux")), latexCache)
 
           // TODO: Handle build error.
-          (pdflatex !)
-          (bibtex !)
-          (pdflatex !)
-          (pdflatex !)
+          if (useBibTex) {
+            pdflatex.!
+            bibtex.!
+            pdflatex.!
+            pdflatex.!
+          } else {
+            pdflatex.!
+          }
 
           //////////////////////////////////////////////////////////////////////
 
@@ -123,5 +101,7 @@ object SBTLaTeX extends Plugin {
     latexUnmanagedBaseDefinition,
     latexResourceDirectoryDefinition,
     latexDefinition,
+    pdfLatexDefault,
+    useBibTexDefault,
     watchSourcesDefinition)
 }
