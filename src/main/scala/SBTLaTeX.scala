@@ -81,7 +81,7 @@ object SBTLaTeX extends Plugin {
           val pdflatex = Process(
             // These flags tell pdflatex to quit if there's an error, not drop
             // into some arcane, ancient, pdflatex shell.
-            "pdflatex" :: "-file-line-error" :: "-halt-on-error" :: latexSourceFile.getName :: Nil,
+            "xelatex" :: "-file-line-error" :: "-halt-on-error" :: latexSourceFile.getName :: Nil,
             latexCache)
 
           val bibtex = Process(
